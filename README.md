@@ -83,6 +83,7 @@ build/crisp-display run --display 7908:320 --looks-like 1344x756
 - O espelhamento adiciona uma etapa de redimensionamento na GPU. É imperceptível no uso normal, mas pode adicionar um pouco de latência em jogos.
 - Mudar a resolução da tela virtual em Ajustes do Sistema vale até o monitor reconectar. Para mudar de vez, use `LOOKS_LIKE`.
 - Com a trava da Dock ligada, a última linha de pixels da borda dos monitores secundários fica inacessível.
+- A trava impede a Dock de sair do principal, mas não consegue trazer ela de volta: a Dock só troca de monitor com movimento real do mouse. Se ela já estiver num secundário (por exemplo, porque o serviço estava parado), empurre o mouse contra a borda de baixo do monitor principal, num trecho que não tenha outro monitor embaixo.
 
 ## Licença
 

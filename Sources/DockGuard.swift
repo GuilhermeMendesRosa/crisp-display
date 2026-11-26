@@ -25,7 +25,7 @@ final class DockGuard {
 
     func start() {
         refresh()
-        moveDockToMainIfNeeded()
+        warnIfDockOutsideMain()
 
         let pointer = Unmanaged.passUnretained(self).toOpaque()
         CGDisplayRegisterReconfigurationCallback({ _, flags, context in
@@ -120,16 +120,13 @@ final class DockGuard {
         allBounds.contains { $0.contains(point) }
     }
 
-    /// Se a Dock já estiver num monitor secundário, reinicia a Dock, que volta no principal.
-    private func moveDockToMainIfNeeded() {
+    /// A Dock só troca de monitor com movimento real do mouse: reiniciar a Dock ou
+    /// simular eventos não adianta. Se ela já estiver num secundário, só avisa.
+    private func warnIfDockOutsideMain() {
         guard let dockFrame = dockDisplayFrame() else { return }
         let main = CGDisplayBounds(CGMainDisplayID())
         guard !main.contains(CGPoint(x: dockFrame.midX, y: dockFrame.midY)) else { return }
-        log("Dock fora do monitor principal: reiniciando a Dock")
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
-        process.arguments = ["Dock"]
-        try? process.run()
+        log("a Dock está fora do monitor principal: empurre o mouse contra a borda de baixo do principal, num trecho sem outro monitor embaixo")
     }
 
     /// A Dock mantém uma janela do tamanho da tela onde está, na camada da Dock.
