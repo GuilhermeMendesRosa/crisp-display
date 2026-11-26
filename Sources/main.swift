@@ -46,7 +46,7 @@ func run(_ arguments: [String]) -> Never {
     let app = NSApplication.shared
     app.setActivationPolicy(.prohibited)
 
-    var mirror: HiDPIMirror?
+    var hiDPI: HiDPI?
     if let displayText = value(after: "--display", in: arguments) {
         guard let target = DisplayMatch(displayText) else { fail("--display inválido: \(displayText)") }
         let sizeText = value(after: "--looks-like", in: arguments) ?? "1344x756"
@@ -54,8 +54,8 @@ func run(_ arguments: [String]) -> Never {
         let positionText = value(after: "--position", in: arguments)
         let placement = positionText.flatMap(Placement.init)
         if let positionText, placement == nil { fail("--position inválido: \(positionText)") }
-        mirror = HiDPIMirror(target: target, looksLike: looksLike, placement: placement)
-        mirror?.start()
+        hiDPI = HiDPI(target: target, looksLike: looksLike, placement: placement)
+        hiDPI?.start()
     }
 
     var dockGuard: DockGuard?
@@ -68,14 +68,14 @@ func run(_ arguments: [String]) -> Never {
         signal(sig, SIG_IGN)
         let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
         source.setEventHandler {
-            mirror?.stop()
+            hiDPI?.stop()
             exit(0)
         }
         source.resume()
         signalSources.append(source)
     }
 
-    withExtendedLifetime((mirror, dockGuard)) { app.run() }
+    withExtendedLifetime((hiDPI, dockGuard)) { app.run() }
     exit(0)
 }
 

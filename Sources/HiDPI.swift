@@ -1,24 +1,31 @@
 import CoreGraphics
 import Foundation
 
-/// Mantém um monitor físico de baixa resolução espelhando uma tela virtual em HiDPI.
+/// Deixa um monitor físico de baixa resolução em HiDPI (interface desenhada em 2x e
+/// reduzida para o painel), com texto e interface nítidos.
 ///
-/// O macOS só oferece modos HiDPI (renderização em 2x) para monitores de alta resolução.
-/// A tela virtual é criada com o dobro dos pixels do tamanho pedido (ex.: 1344x756 vira
-/// 2688x1512) e o monitor físico passa a espelhá-la; a GPU reduz a imagem para a
-/// resolução nativa do painel, deixando texto e interface nítidos.
-///
-/// Se o processo morrer, a tela virtual some e o macOS desfaz o espelhamento sozinho.
-final class HiDPIMirror {
+/// Dois caminhos, nesta ordem:
+/// - Modo próprio: se o monitor já oferece o modo HiDPI pedido (ex.: 1344x756 com
+///   2688x1512 pixels), ele é aplicado direto. Sem tela virtual e sem espelhamento, o
+///   cursor passa entre os monitores sem travar.
+/// - Tela virtual: senão, uma tela virtual com o dobro dos pixels é criada e o monitor
+///   físico passa a espelhá-la. Se o processo morrer, a tela virtual some e o macOS
+///   desfaz o espelhamento sozinho.
+final class HiDPI {
     private static let vendorID: UInt32 = 0xCD15
     private static let reconcileDelay: TimeInterval = 1.0
     private static let extraSizes = ["1280x720", "1344x756", "1440x810", "1600x900", "1920x1080"].compactMap(Size.init)
+    private static let allModesOptions = [kCGDisplayShowDuplicateLowResolutionModes: true] as CFDictionary
 
     private let target: DisplayMatch
     private let looksLike: Size
     private let placement: Placement?
     private var virtualDisplay: CGVirtualDisplay?
     private var pendingReconcile: DispatchWorkItem?
+    /// Monitor em que o modo próprio já foi aplicado nesta conexão. Depois disso, trocas
+    /// feitas em Ajustes do Sistema são respeitadas até o monitor reconectar.
+    private var nativeApplied: CGDirectDisplayID?
+    private var nativeFailed = false
 
     init(target: DisplayMatch, looksLike: Size, placement: Placement?) {
         self.target = target
@@ -30,7 +37,7 @@ final class HiDPIMirror {
         let pointer = Unmanaged.passUnretained(self).toOpaque()
         CGDisplayRegisterReconfigurationCallback({ _, _, context in
             guard let context else { return }
-            Unmanaged<HiDPIMirror>.fromOpaque(context).takeUnretainedValue().scheduleReconcile()
+            Unmanaged<HiDPI>.fromOpaque(context).takeUnretainedValue().scheduleReconcile()
         }, pointer)
         reconcile()
     }
@@ -53,6 +60,18 @@ final class HiDPIMirror {
             if virtualDisplay != nil {
                 log("monitor \(target) desconectado: removendo a tela virtual")
                 virtualDisplay = nil
+            }
+            nativeApplied = nil
+            nativeFailed = false
+            return
+        }
+
+        if virtualDisplay == nil, !nativeFailed, let mode = nativeMode(of: physical) {
+            if nativeApplied != physical {
+                applyNative(mode, to: physical)
+            }
+            if let placement {
+                keepAttached(physical, placement)
             }
             return
         }
@@ -77,29 +96,61 @@ final class HiDPIMirror {
         }
     }
 
-    /// Recoloca a tela virtual encostada no monitor principal quando o macOS a põe em
-    /// outro lugar (ex.: ao reconectar o principal). Deslocamentos ao longo da borda,
-    /// feitos em Ajustes do Sistema, são mantidos.
-    private func keepAttached(_ virtualID: CGDirectDisplayID, _ placement: Placement) {
+    private func findPhysical() -> CGDirectDisplayID? {
+        let virtualID = virtualDisplay?.displayID
+        return Displays.online().first { $0 != virtualID && target.matches($0) }
+    }
+
+    /// Recoloca o monitor encostado no principal quando o macOS o põe em outro lugar
+    /// (ex.: ao reconectar o principal). Deslocamentos ao longo da borda, feitos em
+    /// Ajustes do Sistema, são mantidos.
+    private func keepAttached(_ display: CGDirectDisplayID, _ placement: Placement) {
         let main = CGMainDisplayID()
-        guard virtualID != main else { return }
+        guard display != main else { return }
         let mainBounds = CGDisplayBounds(main)
-        let bounds = CGDisplayBounds(virtualID)
+        let bounds = CGDisplayBounds(display)
         guard !placement.isAttached(bounds, to: mainBounds) else { return }
 
         let origin = placement.centeredOrigin(for: bounds.size, beside: mainBounds)
         var config: CGDisplayConfigRef?
         guard CGBeginDisplayConfiguration(&config) == .success else { return }
-        CGConfigureDisplayOrigin(config, virtualID, Int32(origin.x), Int32(origin.y))
+        CGConfigureDisplayOrigin(config, display, Int32(origin.x), Int32(origin.y))
         if CGCompleteDisplayConfiguration(config, .permanently) == .success {
-            log("tela virtual recolocada: \(placement.rawValue) do monitor principal")
+            log("monitor recolocado: \(placement.rawValue) do monitor principal")
         }
     }
 
-    private func findPhysical() -> CGDirectDisplayID? {
-        let virtualID = virtualDisplay?.displayID
-        return Displays.online().first { $0 != virtualID && target.matches($0) }
+    // MARK: - Modo próprio do monitor
+
+    private func nativeMode(of physical: CGDirectDisplayID) -> CGDisplayMode? {
+        let modes = CGDisplayCopyAllDisplayModes(physical, Self.allModesOptions) as? [CGDisplayMode] ?? []
+        return modes.first { isRequestedHiDPI($0) && $0.isUsableForDesktopGUI() }
     }
+
+    private func applyNative(_ mode: CGDisplayMode, to physical: CGDirectDisplayID) {
+        nativeApplied = physical
+        if let current = CGDisplayCopyDisplayMode(physical), isRequestedHiDPI(current) {
+            log("monitor \(physical) já está em \(looksLike) HiDPI (modo do próprio monitor)")
+            return
+        }
+        var config: CGDisplayConfigRef?
+        guard CGBeginDisplayConfiguration(&config) == .success else { return }
+        CGConfigureDisplayWithDisplayMode(config, physical, mode, nil)
+        let result = CGCompleteDisplayConfiguration(config, .permanently)
+        if result == .success {
+            log("monitor \(physical) em \(looksLike) HiDPI (modo do próprio monitor)")
+        } else {
+            log("erro ao aplicar o modo do monitor (CGError \(result.rawValue)): usando tela virtual")
+            nativeFailed = true
+            scheduleReconcile()
+        }
+    }
+
+    private func isRequestedHiDPI(_ mode: CGDisplayMode) -> Bool {
+        mode.width == looksLike.width && mode.height == looksLike.height && mode.pixelWidth == looksLike.width * 2
+    }
+
+    // MARK: - Tela virtual
 
     private func createVirtualDisplay(for physical: CGDirectDisplayID) {
         let sizes = modeSizes()
@@ -162,10 +213,8 @@ final class HiDPIMirror {
 
     private func applyRequestedMode(to virtualID: CGDirectDisplayID) {
         let modes = CGDisplayCopyAllDisplayModes(virtualID, nil) as? [CGDisplayMode] ?? []
-        let hiDPI = modes.first {
-            $0.width == looksLike.width && $0.height == looksLike.height && $0.pixelWidth == looksLike.width * 2
-        }
-        guard let hiDPI, CGDisplayCopyDisplayMode(virtualID)?.ioDisplayModeID != hiDPI.ioDisplayModeID else { return }
+        guard let hiDPI = modes.first(where: isRequestedHiDPI),
+              CGDisplayCopyDisplayMode(virtualID)?.ioDisplayModeID != hiDPI.ioDisplayModeID else { return }
         CGDisplaySetDisplayMode(virtualID, hiDPI, nil)
     }
 }

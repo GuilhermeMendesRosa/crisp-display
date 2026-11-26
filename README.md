@@ -19,15 +19,27 @@ Isso acontece porque o macOS só oferece os modos **HiDPI** (a interface desenha
 
 ## Como funciona
 
-**HiDPI:** o `crisp-display` cria uma tela virtual com o dobro dos pixels do tamanho que você quer (1344x756 vira 2688x1512) e coloca o monitor físico para espelhá-la. O macOS desenha tudo em 2x e a GPU reduz para a resolução nativa do painel. Fica com o tamanho de 1344x756, mas com texto bem mais nítido. A tela virtual usa a API `CGVirtualDisplay` do CoreGraphics.
+**HiDPI:** o macOS desenha tudo em 2x (1344x756 vira 2688x1512) e reduz para a resolução nativa do painel. Fica com o tamanho de 1344x756, mas com texto bem mais nítido. Há dois caminhos, nesta ordem:
 
-- O monitor desconectou? A tela virtual some junto, então nenhuma janela fica presa numa tela fantasma.
-- O monitor reconectou? Ele volta a espelhar sozinho.
-- O processo morreu? O macOS desfaz o espelhamento e o monitor volta ao normal.
+1. **Modo do próprio monitor.** Se o monitor já oferece o modo HiDPI pedido, o `crisp-display` aplica esse modo direto e reaplica sempre que o monitor reconecta. É o melhor caminho: sem tela virtual e sem espelhamento, o cursor passa entre os monitores sem travar.
+2. **Tela virtual.** Se o modo não existir, ele cria uma tela virtual com o dobro dos pixels (API `CGVirtualDisplay` do CoreGraphics) e coloca o monitor físico para espelhá-la.
+   - O monitor desconectou? A tela virtual some junto, então nenhuma janela fica presa numa tela fantasma.
+   - O monitor reconectou? Ele volta a espelhar sozinho.
+   - O processo morreu? O macOS desfaz o espelhamento e o monitor volta ao normal.
+
+O `crisp-display list` mostra qual caminho está valendo: no espelhamento, o monitor aparece como `espelhando N`.
 
 **Trava da Dock:** o macOS leva a Dock para qualquer monitor em cuja borda de baixo o mouse encosta, o que atrapalha quando o monitor pequeno fica embaixo do grande. O `crisp-display` não deixa o cursor chegar à última linha de pixels dessa borda nos monitores secundários. Assim a Dock nunca sai do principal. Bordas encostadas em outro monitor continuam livres. Também funciona com a Dock na esquerda ou na direita.
 
-Nenhuma das duas partes pede permissão de Acessibilidade ou de Gravação de Tela.
+- O macOS segura o cursor por um instante na borda onde fica a Dock. Se houver um monitor do outro lado e o cursor estiver indo para ele, a trava faz o cursor passar direto.
+- Se a Dock voltar para o principal mas o macOS continuar reservando o espaço dela no secundário (janelas centralizadas lá ficam com uma faixa vazia embaixo), a trava liga e desliga o "ocultar Dock" uma vez para o macOS recalcular.
+
+### Permissões
+
+- **Acessibilidade** (Ajustes do Sistema > Privacidade e Segurança > Acessibilidade): a trava corrige cada movimento do mouse antes de o macOS aplicá-lo, com um event tap, como faz o [DockPin](https://github.com/green2grey/DockPin) (MIT). Sem a permissão, ela corrige depois de o cursor se mover, o que funciona mas pode dar pequenas travadas. O log mostra qual modo está valendo.
+- **Automação** (System Events): só para recalcular o espaço reservado da Dock. É pedida na primeira vez que for preciso.
+
+O macOS amarra essas permissões ao binário. Depois de recompilar e reinstalar, remova o `crisp-display` da lista de Acessibilidade e adicione de novo (`~/.local/bin/crisp-display`, use Cmd+Shift+G no seletor de arquivos).
 
 ## Instalação
 
@@ -79,8 +91,9 @@ build/crisp-display run --display 7908:320 --looks-like 1344x756
 
 ## Limitações
 
+- O modo HiDPI próprio nem sempre existe: monitores 1080p normalmente não oferecem esse modo, e aí vale a tela virtual.
 - `CGVirtualDisplay` é uma API privada da Apple. Ela existe desde o macOS 11 e é usada por vários apps, mas pode mudar numa atualização do sistema.
-- O espelhamento adiciona uma etapa de redimensionamento na GPU. É imperceptível no uso normal, mas pode adicionar um pouco de latência em jogos.
+- O espelhamento (só no caminho da tela virtual) adiciona uma etapa de redimensionamento na GPU. É imperceptível no uso normal, mas pode adicionar um pouco de latência em jogos.
 - Mudar a resolução da tela virtual em Ajustes do Sistema vale até o monitor reconectar. Para mudar de vez, use `LOOKS_LIKE`.
 - Com a trava da Dock ligada, a última linha de pixels da borda dos monitores secundários fica inacessível.
 - A trava impede a Dock de sair do principal, mas não consegue trazer ela de volta: a Dock só troca de monitor com movimento real do mouse. Se ela já estiver num secundário (por exemplo, porque o serviço estava parado), empurre o mouse contra a borda de baixo do monitor principal, num trecho que não tenha outro monitor embaixo.
