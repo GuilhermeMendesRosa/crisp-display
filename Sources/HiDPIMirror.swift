@@ -16,12 +16,14 @@ final class HiDPIMirror {
 
     private let target: DisplayMatch
     private let looksLike: Size
+    private let placement: Placement?
     private var virtualDisplay: CGVirtualDisplay?
     private var pendingReconcile: DispatchWorkItem?
 
-    init(target: DisplayMatch, looksLike: Size) {
+    init(target: DisplayMatch, looksLike: Size, placement: Placement?) {
         self.target = target
         self.looksLike = looksLike
+        self.placement = placement
     }
 
     func start() {
@@ -68,6 +70,29 @@ final class HiDPIMirror {
         }
         if CGDisplayMirrorsDisplay(physical) != virtualID {
             mirror(physical, onto: virtualID)
+            return
+        }
+        if let placement {
+            keepAttached(virtualID, placement)
+        }
+    }
+
+    /// Recoloca a tela virtual encostada no monitor principal quando o macOS a põe em
+    /// outro lugar (ex.: ao reconectar o principal). Deslocamentos ao longo da borda,
+    /// feitos em Ajustes do Sistema, são mantidos.
+    private func keepAttached(_ virtualID: CGDirectDisplayID, _ placement: Placement) {
+        let main = CGMainDisplayID()
+        guard virtualID != main else { return }
+        let mainBounds = CGDisplayBounds(main)
+        let bounds = CGDisplayBounds(virtualID)
+        guard !placement.isAttached(bounds, to: mainBounds) else { return }
+
+        let origin = placement.centeredOrigin(for: bounds.size, beside: mainBounds)
+        var config: CGDisplayConfigRef?
+        guard CGBeginDisplayConfiguration(&config) == .success else { return }
+        CGConfigureDisplayOrigin(config, virtualID, Int32(origin.x), Int32(origin.y))
+        if CGCompleteDisplayConfiguration(config, .permanently) == .success {
+            log("tela virtual recolocada: \(placement.rawValue) do monitor principal")
         }
     }
 
@@ -122,19 +147,17 @@ final class HiDPIMirror {
 
     private func mirror(_ physical: CGDirectDisplayID, onto virtualID: CGDirectDisplayID) {
         applyRequestedMode(to: virtualID)
-        let origin = CGDisplayBounds(physical).origin
 
         var config: CGDisplayConfigRef?
         guard CGBeginDisplayConfiguration(&config) == .success else { return }
-        CGConfigureDisplayOrigin(config, virtualID, Int32(origin.x), Int32(origin.y))
         CGConfigureDisplayMirrorOfDisplay(config, physical, virtualID)
         let result = CGCompleteDisplayConfiguration(config, .forSession)
         if result == .success {
             log("monitor \(physical) espelhando a tela virtual \(virtualID)")
         } else {
             log("erro ao espelhar (CGError \(result.rawValue)), tentando de novo")
-            scheduleReconcile()
         }
+        scheduleReconcile()
     }
 
     private func applyRequestedMode(to virtualID: CGDirectDisplayID) {

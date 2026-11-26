@@ -8,10 +8,12 @@ Uso:
   crisp-display list
       Lista os monitores conectados com o identificador fabricante:modelo.
 
-  crisp-display run [--display FABRICANTE:MODELO] [--looks-like LARGURAxALTURA] [--no-dock-guard]
+  crisp-display run [--display FABRICANTE:MODELO] [--looks-like LARGURAxALTURA]
+                    [--position below|above|left|right] [--no-dock-guard]
       Fica rodando em segundo plano.
       --display     monitor que vai ganhar HiDPI (veja em `list`). Sem ele, só a trava da Dock roda.
       --looks-like  tamanho da interface no monitor (padrão: 1344x756).
+      --position    mantém o monitor HiDPI encostado nesse lado do principal.
       --no-dock-guard  não trava a Dock no monitor principal.
 """
 
@@ -49,7 +51,10 @@ func run(_ arguments: [String]) -> Never {
         guard let target = DisplayMatch(displayText) else { fail("--display inválido: \(displayText)") }
         let sizeText = value(after: "--looks-like", in: arguments) ?? "1344x756"
         guard let looksLike = Size(sizeText) else { fail("--looks-like inválido: \(sizeText)") }
-        mirror = HiDPIMirror(target: target, looksLike: looksLike)
+        let positionText = value(after: "--position", in: arguments)
+        let placement = positionText.flatMap(Placement.init)
+        if let positionText, placement == nil { fail("--position inválido: \(positionText)") }
+        mirror = HiDPIMirror(target: target, looksLike: looksLike, placement: placement)
         mirror?.start()
     }
 

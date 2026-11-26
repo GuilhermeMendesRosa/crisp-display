@@ -9,6 +9,7 @@ DOMAIN     := gui/$(shell id -u)
 # DISPLAY_ID vazio deixa só a trava da Dock.
 DISPLAY_ID ?=
 LOOKS_LIKE ?= 1344x756
+POSITION   ?=
 DOCK_GUARD ?= 1
 
 SOURCES := $(wildcard Sources/*.swift)
@@ -17,6 +18,9 @@ HEADER  := Sources/CGVirtualDisplay.h
 ARGS := run
 ifneq ($(DISPLAY_ID),)
 ARGS += --display $(DISPLAY_ID) --looks-like $(LOOKS_LIKE)
+ifneq ($(POSITION),)
+ARGS += --position $(POSITION)
+endif
 endif
 ifeq ($(DOCK_GUARD),0)
 ARGS += --no-dock-guard
@@ -40,6 +44,7 @@ install: build
 	@sed -e 's|@LABEL@|$(LABEL)|' -e 's|@BIN@|$(BIN)|' -e 's|@LOG@|$(LOG)|' \
 		-e '/@ARGS@/{r build/args.xml' -e 'd;}' launchd/agent.plist.in > $(PLIST)
 	@launchctl bootout $(DOMAIN)/$(LABEL) 2>/dev/null || true
+	@while launchctl print $(DOMAIN)/$(LABEL) >/dev/null 2>&1; do sleep 0.2; done
 	launchctl bootstrap $(DOMAIN) $(PLIST)
 	@echo "instalado: $(BIN) $(ARGS)"
 

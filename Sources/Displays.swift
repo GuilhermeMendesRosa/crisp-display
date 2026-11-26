@@ -35,6 +35,33 @@ struct Size: CustomStringConvertible {
     var description: String { "\(width)x\(height)" }
 }
 
+/// Lado do monitor principal em que o monitor HiDPI deve ficar encostado.
+enum Placement: String {
+    case below, above, left, right
+
+    func isAttached(_ bounds: CGRect, to main: CGRect) -> Bool {
+        let overlapsHorizontally = bounds.maxX > main.minX && bounds.minX < main.maxX
+        let overlapsVertically = bounds.maxY > main.minY && bounds.minY < main.maxY
+        switch self {
+        case .below: return abs(bounds.minY - main.maxY) < 1 && overlapsHorizontally
+        case .above: return abs(bounds.maxY - main.minY) < 1 && overlapsHorizontally
+        case .left: return abs(bounds.maxX - main.minX) < 1 && overlapsVertically
+        case .right: return abs(bounds.minX - main.maxX) < 1 && overlapsVertically
+        }
+    }
+
+    func centeredOrigin(for size: CGSize, beside main: CGRect) -> CGPoint {
+        let centerX = (main.minX + (main.width - size.width) / 2).rounded()
+        let centerY = (main.minY + (main.height - size.height) / 2).rounded()
+        switch self {
+        case .below: return CGPoint(x: centerX, y: main.maxY)
+        case .above: return CGPoint(x: centerX, y: main.minY - size.height)
+        case .left: return CGPoint(x: main.minX - size.width, y: centerY)
+        case .right: return CGPoint(x: main.maxX, y: centerY)
+        }
+    }
+}
+
 enum Displays {
     static func online() -> [CGDirectDisplayID] {
         list(CGGetOnlineDisplayList)

@@ -49,7 +49,7 @@ O `make list` mostra os monitores com o identificador `fabricante:modelo`:
 Instale apontando para o monitor que vai ganhar HiDPI:
 
 ```sh
-make install DISPLAY_ID=7908:320 LOOKS_LIKE=1344x756
+make install DISPLAY_ID=7908:320 LOOKS_LIKE=1344x756 POSITION=below
 ```
 
 Isso copia o binário para `~/.local/bin` e cria um LaunchAgent que abre no login e reinicia sozinho se cair.
@@ -58,6 +58,7 @@ Isso copia o binário para `~/.local/bin` e cria um LaunchAgent que abre no logi
 | ------------ | ---------- | ------------------------------------------------------------ |
 | `DISPLAY_ID` | (vazio)    | Monitor que vai ganhar HiDPI. Vazio liga só a trava da Dock. |
 | `LOOKS_LIKE` | `1344x756` | Tamanho da interface. Menor deixa tudo maior.                |
+| `POSITION`   | (vazio)    | `below`, `above`, `left` ou `right`: mantém o monitor HiDPI encostado nesse lado do principal. Sem ela, quem decide é o macOS. |
 | `DOCK_GUARD` | `1`        | `0` desliga a trava da Dock.                                 |
 
 Tamanhos para um monitor 16:9 de 14": `1280x720` (bem grande), `1344x756` (equilibrado), `1600x900` (mais espaço). Para trocar, rode `make install` de novo com outro `LOOKS_LIKE`.

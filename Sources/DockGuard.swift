@@ -17,6 +17,7 @@ final class DockGuard {
     private static let orientationRefresh: TimeInterval = 5
 
     private var edge: Edge = .bottom
+    private var mainBounds: CGRect = .null
     private var secondaryBounds: [CGRect] = []
     private var allBounds: [CGRect] = []
     private var monitor: Any?
@@ -33,8 +34,8 @@ final class DockGuard {
             DispatchQueue.main.async { guardian.refresh() }
         }, pointer)
 
-        monitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged, .rightMouseDragged]) { [weak self] _ in
-            self?.handleMouseMoved()
+        monitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged, .rightMouseDragged]) { [weak self] event in
+            self?.handleMouseMoved(event)
         }
         timer = Timer.scheduledTimer(withTimeInterval: Self.orientationRefresh, repeats: true) { [weak self] _ in
             self?.refresh()
@@ -48,18 +49,51 @@ final class DockGuard {
         let main = CGMainDisplayID()
         let arranged = Displays.arranged()
         allBounds = arranged.map(CGDisplayBounds)
+        mainBounds = CGDisplayBounds(main)
         secondaryBounds = arranged.filter { $0 != main }.map(CGDisplayBounds)
     }
 
-    private func handleMouseMoved() {
+    private func handleMouseMoved(_ event: NSEvent) {
         guard let point = CGEvent(source: nil)?.location else { return }
+        if let crossed = passThrough(from: point, movingBy: CGVector(dx: event.deltaX, dy: event.deltaY)) {
+            warp(to: crossed)
+            return
+        }
         for bounds in secondaryBounds {
             if let corrected = correction(for: point, on: bounds) {
-                CGWarpMouseCursorPosition(corrected)
-                CGAssociateMouseAndMouseCursorPosition(1)
+                warp(to: corrected)
                 return
             }
         }
+    }
+
+    private func warp(to point: CGPoint) {
+        CGWarpMouseCursorPosition(point)
+        CGAssociateMouseAndMouseCursorPosition(1)
+    }
+
+    /// O macOS segura o cursor por um instante na borda onde está a Dock, para facilitar
+    /// acertá-la. Se houver outro monitor do outro lado dessa borda e o cursor estiver
+    /// indo em direção a ele, passa direto, sem a travada.
+    private func passThrough(from point: CGPoint, movingBy delta: CGVector) -> CGPoint? {
+        let main = mainBounds
+        guard !main.isNull else { return nil }
+        let target: CGPoint
+        switch edge {
+        case .bottom:
+            guard delta.dy > 0, point.x >= main.minX, point.x < main.maxX,
+                  point.y >= main.maxY - Self.edgeThreshold, point.y < main.maxY else { return nil }
+            target = CGPoint(x: point.x, y: main.maxY + 1)
+        case .left:
+            guard delta.dx < 0, point.y >= main.minY, point.y < main.maxY,
+                  point.x >= main.minX, point.x < main.minX + Self.edgeThreshold else { return nil }
+            target = CGPoint(x: main.minX - 1, y: point.y)
+        case .right:
+            guard delta.dx > 0, point.y >= main.minY, point.y < main.maxY,
+                  point.x >= main.maxX - Self.edgeThreshold, point.x < main.maxX else { return nil }
+            target = CGPoint(x: main.maxX + 1, y: point.y)
+        }
+        return isCovered(target) ? target : nil
     }
 
     private func correction(for point: CGPoint, on bounds: CGRect) -> CGPoint? {
